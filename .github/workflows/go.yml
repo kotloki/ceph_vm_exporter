@@ -1,69 +1,64 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
 name: Go
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+
+permissions:
+  contents: write     #  required for ncipollo/release-action
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [linux]
+        os:   [linux]
         arch: [amd64, 386, arm64]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-  
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-go@v4
         with:
           go-version: '1.20'
-  
+
       - name: Build binary
         env:
-          GOOS: ${{ matrix.os }}
+          GOOS:   ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
         run: |
-          mkdir -p build/${{ matrix.os }}_${{ matrix.arch }}
-          go build -ldflags "-X main.version=${{ github.ref_name }}" -a -o build/${{ matrix.os }}_${{ matrix.arch }}/ceph_vm_exporter
-  
+          mkdir -p dist
+          go build -ldflags "-X main.version=${{ github.ref_name }}" \
+                  -o dist/ceph_vm_exporter
+
       - name: Package binary
         run: |
           mkdir -p release
-          tar -czf release/ceph_vm_exporter-${{ github.ref_name }}.${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C build/${{ matrix.os }}_${{ matrix.arch }} ceph_vm_exporter
-  
-      - name: Upload artifacts
+          tar -C dist -czf \
+            release/ceph_vm_exporter-${{ github.ref_name }}.${{ matrix.os }}-${{ matrix.arch }}.tar.gz \
+            ceph_vm_exporter
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
-          name: binaries
+          name: binaries-${{ matrix.os }}-${{ matrix.arch }}   # <-- uniq name
           path: release/*.tar.gz
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
+      - name: Download ALL artifacts
         uses: actions/download-artifact@v3
         with:
-          name: binaries
-          path: release
-  
-      - name: List files
-        run: ls -R release
-  
-      - name: Create Release and Upload Assets
+          path: release      # download all  binaries-*-* in this folder
+
+      - run: ls -R release   # проверка
+
+      - name: Create GitHub Release & upload assets
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ github.ref_name }}
+          tag:         ${{ github.ref_name }}
           releaseName: Release ${{ github.ref_name }}
-          artifacts: release/*.tar.gz
-          token: ${{ secrets.GITHUB_TOKEN }}
-          draft: false
-          prerelease: false
+          artifacts:   release/**/*.tar.gz
+          token:       ${{ secrets.GITHUB_TOKEN }}
