@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bytes"
     "context"
     "encoding/json"
     "flag"
@@ -9,9 +10,7 @@ import (
     "net/http"
     "os/exec"
     "strings"
-
     "time"
-    "bytes"
 
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promhttp"
@@ -22,14 +21,14 @@ import (
 //------------------------------------------------------------------------
 
 var (
-    version      = "0.1.12"
+    version      = "0.1.15"
     metricPrefix = "ceph_vm_"
-    debug        = false // enable by flag --debug
+    debug        bool
 )
 
-//------------------------------------------------------------------------
+// ---------------------------------------------------------------
 // CLI flags
-//------------------------------------------------------------------------
+// ---------------------------------------------------------------
 
 type cliFlags struct {
     pool      string
@@ -41,23 +40,19 @@ type cliFlags struct {
 
 func parseFlags() cliFlags {
     var c cliFlags
-
     flag.StringVar(&c.pool, "pool", "ceph-pool1", "Ceph pool to scan for VM images")
     flag.StringVar(&c.ipAddress, "ipaddress", "", "IP address to listen on (empty = all interfaces)")
     flag.IntVar(&c.port, "port", 9125, "TCP port to listen on (default 9125)")
     flag.BoolVar(&c.showVer, "version", false, "Print version and exit")
     flag.BoolVar(&c.debug, "debug", false, "Enable verbose debug logging")
-
     flag.Parse()
     return c
 }
 
-// -----------------------------------------------------------------------------
-// Helper: run rbd and return stdout
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------
+// rbd wrapper with debug
+// ---------------------------------------------------------------
 
-// runRBD executes the rbd CLI with optional --cluster and returns stdout.
-// In debug mode stdout and sterr show in log
 func runRBD(ctx context.Context, cluster string, args ...string) ([]byte, error) {
     if cluster != "" {
         args = append([]string{"--cluster", cluster}, args...)
@@ -65,11 +60,9 @@ func runRBD(ctx context.Context, cluster string, args ...string) ([]byte, error)
     if debug {
         log.Printf("[DEBUG] run: rbd %s", strings.Join(args, " "))
     }
-
     cmd := exec.CommandContext(ctx, "rbd", args...)
     var stderr bytes.Buffer
     cmd.Stderr = &stderr
-
     out, err := cmd.Output()
     if err != nil && debug {
         log.Printf("[DEBUG] rbd error: %v; stderr: %s", err, strings.TrimSpace(stderr.String()))
@@ -77,13 +70,15 @@ func runRBD(ctx context.Context, cluster string, args ...string) ([]byte, error)
     return out, err
 }
 
-//------------------------------------------------------------------------
-// JSON models
-//------------------------------------------------------------------------
+// ---------------------------------------------------------------
+// JSON structs
+// ---------------------------------------------------------------
 
-type imageEntry struct {
+type poolStatus struct {
+    Images []struct {
     Name string `json:"name"`
-    Mode string `json:"mode"` // journal / snapshot / disabled / …
+        Mode string `json:"mirror_image_mode"`
+    } `json:"images"`
 }
 
 type mirrorStatus struct {
@@ -107,9 +102,9 @@ type snapshotStats struct {
     LastSnapshotSyncSeconds float64 `json:"last_snapshot_sync_seconds"`
 }
 
-//--------------------------------------------------------------------
+// ---------------------------------------------------------------
 // Prometheus collector
-//--------------------------------------------------------------------
+// ---------------------------------------------------------------
 
 type mirrorCollector struct {
     cluster string
@@ -128,25 +123,22 @@ type mirrorCollector struct {
     descSnapLastSnapshotSyncSecs *prometheus.Desc
 }
 
-func newMirrorCollector(cluster, pool string) *mirrorCollector {
-    lbls := []string{"cluster", "pool", "image"}
+func newCollector(cluster, pool string) *mirrorCollector {
+    lbl := []string{"cluster", "pool", "image"}
     mp := metricPrefix
-
     return &mirrorCollector{
         cluster: cluster,
         pool:    pool,
-
-        descJournalSpeed:              prometheus.NewDesc(mp+"journal_speed_mib_per_sec", "Journal replay speed (MiB/s)", lbls, nil),
-        descJournalEntriesBehind:      prometheus.NewDesc(mp+"journal_entries_behind_primary", "Journal entries behind primary", lbls, nil),
-        descJournalEntriesPerSecond:   prometheus.NewDesc(mp+"journal_entries_per_sec", "Journal entries applied per second", lbls, nil),
-        descJournalSecondsUntilSynced: prometheus.NewDesc(mp+"journal_seconds_until_synced", "Estimated seconds until fully synced", lbls, nil),
-
-        descSnapSyncPercent:           prometheus.NewDesc(mp+"snapshot_sync_percent", "Snapshot mirroring progress (%)", lbls, nil),
-        descSnapSpeed:                 prometheus.NewDesc(mp+"snapshot_speed_mib_per_sec", "Snapshot sync speed (MiB/s)", lbls, nil),
-        descSnapSecondsUntilSynced:    prometheus.NewDesc(mp+"snapshot_seconds_until_synced", "Estimated seconds until fully synced", lbls, nil),
-        descSnapBytesPerSnapshot:      prometheus.NewDesc(mp+"snapshot_bytes_per_snapshot_mib", "Bytes transferred per snapshot (MiB)", lbls, nil),
-        descSnapLastSnapshotBytes:     prometheus.NewDesc(mp+"snapshot_last_snapshot_bytes_mib", "Size of last snapshot transferred (MiB)", lbls, nil),
-        descSnapLastSnapshotSyncSecs:  prometheus.NewDesc(mp+"snapshot_last_snapshot_sync_seconds", "Duration of last snapshot sync (seconds)", lbls, nil),
+        descJournalSpeed:              prometheus.NewDesc(mp+"journal_speed_mib_per_sec", "Journal replay speed (MiB/s)", lbl, nil),
+        descJournalEntriesBehind:      prometheus.NewDesc(mp+"journal_entries_behind_primary", "Journal entries behind primary", lbl, nil),
+        descJournalEntriesPerSecond:   prometheus.NewDesc(mp+"journal_entries_per_sec", "Journal entries applied per second", lbl, nil),
+        descJournalSecondsUntilSynced: prometheus.NewDesc(mp+"journal_seconds_until_synced", "Estimated seconds until fully synced", lbl, nil),
+        descSnapSyncPercent:           prometheus.NewDesc(mp+"snapshot_sync_percent", "Snapshot mirroring progress (%)", lbl, nil),
+        descSnapSpeed:                 prometheus.NewDesc(mp+"snapshot_speed_mib_per_sec", "Snapshot sync speed (MiB/s)", lbl, nil),
+        descSnapSecondsUntilSynced:    prometheus.NewDesc(mp+"snapshot_seconds_until_synced", "Estimated seconds until fully synced", lbl, nil),
+        descSnapBytesPerSnapshot:      prometheus.NewDesc(mp+"snapshot_bytes_per_snapshot_mib", "Bytes per snapshot (MiB)", lbl, nil),
+        descSnapLastSnapshotBytes:     prometheus.NewDesc(mp+"snapshot_last_snapshot_bytes_mib", "Last snapshot size (MiB)", lbl, nil),
+        descSnapLastSnapshotSyncSecs:  prometheus.NewDesc(mp+"snapshot_last_snapshot_sync_seconds", "Last snapshot sync time (s)", lbl, nil),
     }
 }
 
@@ -165,42 +157,38 @@ func (c *mirrorCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
-    ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
     defer cancel()
 
-    // 1. List mirring images
-    listRaw, err := runRBD(ctx, c.cluster, "mirror", "image", "list", c.pool, "--format", "json")
+    // 1. mirror pool status
+    raw, err := runRBD(ctx, c.cluster, "mirror", "pool", "status", c.pool, "--verbose", "--format", "json")
     if err != nil {
-        log.Printf("mirror image list error (cluster=%s pool=%s): %v", c.cluster, c.pool, err)
+        log.Printf("mirror pool status error: %v", err)
         return
     }
 
-    var images []imageEntry
-    if err := json.Unmarshal(listRaw, &images); err != nil {
-        log.Printf("json decode list: %v", err)
+    var ps poolStatus
+    if err := json.Unmarshal(raw, &ps); err != nil {
+        log.Printf("decode pool status: %v", err)
         return
     }
 
-    // 2. Detailed status for journal/snapshot mode images
-    for _, img := range images {
+    for _, img := range ps.Images {
         if img.Mode != "journal" && img.Mode != "snapshot" {
-            continue // skip disabled, image, etc.
+            continue
         }
 
-        statusRaw, err := runRBD(ctx, c.cluster, "mirror", "image", "status", fmt.Sprintf("%s/%s", c.pool, img.Name), "--format", "json")
+        sraw, err := runRBD(ctx, c.cluster, "mirror", "image", "status", fmt.Sprintf("%s/%s", c.pool, img.Name), "--format", "json")
         if err != nil {
             log.Printf("status for %s: %v", img.Name, err)
             continue
         }
-
         var ms mirrorStatus
-        if err := json.Unmarshal(statusRaw, &ms); err != nil {
-            log.Printf("decode status for %s: %v", img.Name, err)
+        if err := json.Unmarshal(sraw, &ms); err != nil {
+            log.Printf("decode status: %v", err)
             continue
         }
-
-        labels := []string{c.cluster, c.pool, img.Name}
-
+        lbl := []string{c.cluster, c.pool, img.Name}
         switch ms.Mode {
         case "journal":
             if ms.ReplayingStatus == nil {
@@ -215,9 +203,9 @@ func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
             if ms.SnapshotStatus == nil {
                 continue
             }
-            speedMiB := 0.0
+            speed := 0.0
             if ms.SnapshotStatus.LastSnapshotSyncSeconds > 0 {
-                speedMiB = (ms.SnapshotStatus.LastSnapshotBytes / ms.SnapshotStatus.LastSnapshotSyncSeconds) / 1048576
+                speed = (ms.SnapshotStatus.LastSnapshotBytes / ms.SnapshotStatus.LastSnapshotSyncSeconds) / 1048576
             }
             ch <- prometheus.MustNewConstMetric(c.descSnapSyncPercent, prometheus.GaugeValue, ms.SnapshotStatus.SyncingPercent, labels...)
             ch <- prometheus.MustNewConstMetric(c.descSnapSpeed, prometheus.GaugeValue, speedMiB, labels...)
