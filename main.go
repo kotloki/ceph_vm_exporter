@@ -19,7 +19,7 @@ import (
 //--------------------------------------------------------------------
 
 var (
-    version      = "0.1.5"
+    version      = "0.1.6"
     metricPrefix = "ceph_vm_" // переопределяйте на сборке, если нужно
 )
 
@@ -150,7 +150,7 @@ func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
     defer cancel()
 
     // 1. List mirring images
-    listRaw, err := runRBD(ctx, c.cluster, "mirror", "image", "list", "-p", c.pool, "--format", "json")
+    listRaw, err := runRBD(ctx, c.cluster, "mirror", "image", "list", c.pool, "--format", "json")
     if err != nil {
         log.Printf("mirror image list error (cluster=%s pool=%s): %v", c.cluster, c.pool, err)
         return
