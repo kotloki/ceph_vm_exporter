@@ -22,7 +22,7 @@ import (
 //------------------------------------------------------------------------
 
 var (
-    version      = "0.1.11"
+    version      = "0.1.12"
     metricPrefix = "ceph_vm_"
     debug        = false // enable by flag --debug
 )
@@ -251,16 +251,17 @@ func metricsHandler(pool string) http.HandlerFunc {
 func main() {
     cfg := parseFlags()
 
+    debug = cfg.debug            // debug enabling
+
     if cfg.showVer {
         fmt.Println(version)
         return
     }
-    
 
     http.HandleFunc("/metrics", metricsHandler(cfg.pool))
 
     addr := fmt.Sprintf("%s:%d", cfg.ipAddress, cfg.port)
-    log.Printf("Ceph VM mirror exporter %s listening on %s (pool=\"%s\")", version, addr, cfg.pool)
+    log.Printf("Ceph VM mirror exporter %s listening on %s (pool=%q)", version, addr, cfg.pool)
 
     if err := http.ListenAndServe(addr, nil); err != nil {
         log.Fatalf("server error: %v", err)
