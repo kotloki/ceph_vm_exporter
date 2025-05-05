@@ -7,7 +7,6 @@ import (
     "fmt"
     "log"
     "net/http"
-    "os"
     "os/exec"
     "time"
 
@@ -20,7 +19,7 @@ import (
 //--------------------------------------------------------------------
 
 var (
-    version      = "0.1.4"
+    version      = "0.1.5"
     metricPrefix = "ceph_vm_" // переопределяйте на сборке, если нужно
 )
 
@@ -237,6 +236,7 @@ func main() {
         fmt.Println(version)
         return
     }
+    
 
     http.HandleFunc("/metrics", metricsHandler(cfg.pool))
 
