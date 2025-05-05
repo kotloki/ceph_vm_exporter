@@ -9,6 +9,7 @@ import (
     "net/http"
     "os/exec"
     "strings"
+    "io"
     "time"
 
     "github.com/prometheus/client_golang/prometheus"
@@ -20,7 +21,7 @@ import (
 //------------------------------------------------------------------------
 
 var (
-    version      = "0.1.8"
+    version      = "0.1.9"
     metricPrefix = "ceph_vm_"
     debug        = false // enable by flag --debug
 )
