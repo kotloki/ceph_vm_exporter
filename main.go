@@ -8,30 +8,33 @@ import (
     "log"
     "net/http"
     "os/exec"
+    "strings"
     "time"
 
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-//--------------------------------------------------------------------
-// Build‑time variables (override via: go build -ldflags "-X main.version=…")
-//--------------------------------------------------------------------
+//------------------------------------------------------------------------
+// Build‑time variables (go build -ldflags "-X main.version=…")
+//------------------------------------------------------------------------
 
 var (
-    version      = "0.1.7"
-    metricPrefix = "ceph_vm_" // переопределяйте на сборке, если нужно
+    version      = "0.1.8"
+    metricPrefix = "ceph_vm_"
+    debug        = false // enable by flag --debug
 )
 
-//--------------------------------------------------------------------
+//------------------------------------------------------------------------
 // CLI flags
-//--------------------------------------------------------------------
+//------------------------------------------------------------------------
 
 type cliFlags struct {
     pool      string
     ipAddress string
     port      int
     showVer   bool
+    debug     bool
 }
 
 func parseFlags() cliFlags {
@@ -41,6 +44,7 @@ func parseFlags() cliFlags {
     flag.StringVar(&c.ipAddress, "ipaddress", "", "IP address to listen on (empty = all interfaces)")
     flag.IntVar(&c.port, "port", 9125, "TCP port to listen on (default 9125)")
     flag.BoolVar(&c.showVer, "version", false, "Print version and exit")
+    flag.BoolVar(&c.debug, "debug", false, "Enable verbose debug logging")
 
     flag.Parse()
     return c
@@ -50,17 +54,31 @@ func parseFlags() cliFlags {
 // Helper: run rbd and return stdout
 // -----------------------------------------------------------------------------
 
+// runRBD executes the rbd CLI with optional --cluster and returns stdout.
+// In debug mode stdout and sterr show in log
 func runRBD(ctx context.Context, cluster string, args ...string) ([]byte, error) {
     if cluster != "" {
         args = append([]string{"--cluster", cluster}, args...)
     }
+    if debug {
+        log.Printf("[DEBUG] run: rbd %s", strings.Join(args, " "))
+    }
     cmd := exec.CommandContext(ctx, "rbd", args...)
-    return cmd.Output()
+
+    // capture stderr for diagnostics
+    stderr, _ := cmd.StderrPipe()
+    stdout, err := cmd.Output()
+    if err != nil && debug {
+        // read stderr for context
+        b, _ := io.ReadAll(stderr)
+        log.Printf("[DEBUG] rbd error: %v; stderr: %s", err, strings.TrimSpace(string(b)))
+    }
+    return stdout, err
 }
 
-//--------------------------------------------------------------------
+//------------------------------------------------------------------------
 // JSON models
-//--------------------------------------------------------------------
+//------------------------------------------------------------------------
 
 type imageEntry struct {
     Name string `json:"name"`
