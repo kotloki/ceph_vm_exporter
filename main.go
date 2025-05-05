@@ -11,6 +11,7 @@ import (
     "strings"
     "io"
     "time"
+    "bytes"
 
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promhttp"
@@ -21,7 +22,7 @@ import (
 //------------------------------------------------------------------------
 
 var (
-    version      = "0.1.9"
+    version      = "0.1.10"
     metricPrefix = "ceph_vm_"
     debug        = false // enable by flag --debug
 )
@@ -64,17 +65,16 @@ func runRBD(ctx context.Context, cluster string, args ...string) ([]byte, error)
     if debug {
         log.Printf("[DEBUG] run: rbd %s", strings.Join(args, " "))
     }
-    cmd := exec.CommandContext(ctx, "rbd", args...)
 
-    // capture stderr for diagnostics
-    stderr, _ := cmd.StderrPipe()
-    stdout, err := cmd.Output()
+    cmd := exec.CommandContext(ctx, "rbd", args...)
+    var stderr bytes.Buffer
+    cmd.Stderr = &stderr
+
+    out, err := cmd.Output()
     if err != nil && debug {
-        // read stderr for context
-        b, _ := io.ReadAll(stderr)
-        log.Printf("[DEBUG] rbd error: %v; stderr: %s", err, strings.TrimSpace(string(b)))
+        log.Printf("[DEBUG] rbd error: %v; stderr: %s", err, strings.TrimSpace(stderr.String()))
     }
-    return stdout, err
+    return out, err
 }
 
 //------------------------------------------------------------------------
