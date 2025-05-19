@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -10,14 +11,13 @@ import (
     "os/exec"
 	"strings"
 	"time"
-	"bytes"
 
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	Version      = "0.1.18" // overridden by build flags
+	Version      = "0.1.19" // overridden by build flags
 	MetricPrefix = "ceph_vm_"
 	Debug        = false
 )
@@ -77,6 +77,8 @@ type poolStatus struct {
 		Name      string `json:"name"`
 		PeerSites []struct {
 			Description string `json:"description"`
+			State       string `json:"state"`
+			LastUpdate  string `json:"last_update"`
 		} `json:"peer_sites"`
 	} `json:"images"`
 }
@@ -172,7 +174,7 @@ func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
 			replicationOK = 1.0
 		}
 		ch <- prometheus.MustNewConstMetric(c.descSnapReplicationState, prometheus.GaugeValue, replicationOK, append(labels, peer.State)...) 
-s
+
 		// Last update timestamp
 		if t, err := time.Parse("2006-01-02 15:04:05", peer.LastUpdate); err == nil {
 			ch <- prometheus.MustNewConstMetric(c.descSnapLastUpdateTimestamp, prometheus.GaugeValue, float64(t.Unix()), labels...)
