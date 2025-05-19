@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	Version      = "0.1.17" // overridden by build flags
+	Version      = "0.1.18" // overridden by build flags
 	MetricPrefix = "ceph_vm_"
 	Debug        = false
 )
@@ -97,6 +97,8 @@ type mirrorCollector struct {
 	descSnapBytesPerSnapshot     *prometheus.Desc
 	descSnapLastSnapshotBytes    *prometheus.Desc
 	descSnapLastSnapshotSyncSecs *prometheus.Desc
+	descSnapReplicationState     *prometheus.Desc
+	descSnapLastUpdateTimestamp  *prometheus.Desc
 }
 
 func NewCollector(pool string) prometheus.Collector {
@@ -108,6 +110,8 @@ func NewCollector(pool string) prometheus.Collector {
 		descSnapBytesPerSnapshot:     prometheus.NewDesc(mp+"snapshot_bytes_per_snapshot_mib", "Bytes per snapshot (MiB)", labels, nil),
 		descSnapLastSnapshotBytes:    prometheus.NewDesc(mp+"snapshot_last_snapshot_bytes_mib", "Last snapshot size transferred (MiB)", labels, nil),
 		descSnapLastSnapshotSyncSecs: prometheus.NewDesc(mp+"snapshot_last_snapshot_sync_seconds", "Duration of last snapshot sync (s)", labels, nil),
+		descSnapReplicationState:     prometheus.NewDesc(mp+"snapshot_replication_state", "Replication state (1=OK, 0=Not OK)", append(labels, "state"), nil),
+		descSnapLastUpdateTimestamp:  prometheus.NewDesc(mp+"snapshot_last_update_timestamp", "Timestamp of last update (unix)", labels, nil),
     }
 }
 
@@ -116,6 +120,8 @@ func (c *mirrorCollector) Describe(ch chan<- *prometheus.Desc) {
     ch <- c.descSnapBytesPerSnapshot
     ch <- c.descSnapLastSnapshotBytes
     ch <- c.descSnapLastSnapshotSyncSecs
+	ch <- c.descSnapReplicationState
+	ch <- c.descSnapLastUpdateTimestamp
 }
 
 func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
@@ -137,7 +143,8 @@ func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
 		if len(img.PeerSites) == 0 {
             continue
         }
-		desc := img.PeerSites[0].Description
+		peer := img.PeerSites[0]
+		desc := peer.Description
 		idx := strings.Index(desc, "{")
 		if idx == -1 {
             continue
@@ -158,5 +165,17 @@ func (c *mirrorCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.descSnapBytesPerSnapshot, prometheus.GaugeValue, stats.BytesPerSnapshot/1048576, labels...)
 		ch <- prometheus.MustNewConstMetric(c.descSnapLastSnapshotBytes, prometheus.GaugeValue, stats.LastSnapshotBytes/1048576, labels...)
 		ch <- prometheus.MustNewConstMetric(c.descSnapLastSnapshotSyncSecs, prometheus.GaugeValue, stats.LastSnapshotSyncSeconds, labels...)
+
+		// Replication state: 1 if OK, 0 otherwise
+		replicationOK := 0.0
+		if strings.Contains(peer.State, "replaying") {
+			replicationOK = 1.0
+		}
+		ch <- prometheus.MustNewConstMetric(c.descSnapReplicationState, prometheus.GaugeValue, replicationOK, append(labels, peer.State)...) 
+s
+		// Last update timestamp
+		if t, err := time.Parse("2006-01-02 15:04:05", peer.LastUpdate); err == nil {
+			ch <- prometheus.MustNewConstMetric(c.descSnapLastUpdateTimestamp, prometheus.GaugeValue, float64(t.Unix()), labels...)
+		}
         }
 }
